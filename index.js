@@ -1,65 +1,51 @@
 const express = require("express");
 const fetch = require("node-fetch");
-const app = express();  // Initialize the app instance
+const app = express();
 
-// In-memory store for IPs and the routes they have accessed
 const ipRouteTracker = {}; 
 
-app.use(express.json()); // Middleware to handle JSON requests
+app.use(express.json());
 
-// Middleware to check if the IP has already accessed the route
 app.use((req, res, next) => {
-  const clientIp = req.ip; // Get the IP address of the client
-  const routeName = req.path.slice(1); // Extract the route name (e.g., /test -> test)
+  const clientIp = req.ip;
+  const routeName = req.path.slice(1);
 
-  // Initialize the IP entry in the tracker if it doesn't exist
   if (!ipRouteTracker[clientIp]) {
     ipRouteTracker[clientIp] = {};
   }
 
-  // Check if this IP has already accessed this route
   if (ipRouteTracker[clientIp][routeName]) {
-    // If the IP has already accessed this route, skip sending the webhook
     res.locals.messageSent = true;
   } else {
-    // If the IP hasn't accessed this route yet, mark it
     ipRouteTracker[clientIp][routeName] = true;
-    res.locals.messageSent = false; // No message has been sent for this route yet
+    res.locals.messageSent = false;
   }
 
-  // Proceed with the request
   next();
 });
 
-// Define the catch-all route to capture any URL
 app.get("*", (req, res) => {
-  const routeName = req.path.slice(1); // Get the full path (e.g., /test -> test)
-  console.log("Accessed route:", routeName);
+  const routeName = req.path.slice(1);
+  const clientIp = req.ip;
 
-  const clientIp = req.ip; // Get the IP address of the client
-
-  // If the message hasn't been sent yet, send the webhook
   if (!res.locals.messageSent) {
-    // Send the route name to Discord via webhook
-    const webhookURL = process.env.DISCORD_WEBHOOK; // Your Discord webhook URL
+    const webhookURL = process.env.DISCORD_WEBHOOK;
 
     const payload = {
-      content: Someone accessed the ${routeName} route from IP: ${clientIp}.
+      content: `Someone accessed the ${routeName} route from IP: ${clientIp}.`
     };
 
-    // Send to Discord webhook
     fetch(webhookURL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     })
-    .then(response => response.text())
-    .then(data => console.log("Route name sent to Discord:", data))
-    .catch(error => console.error("Error sending to Discord:", error));
+      .then(response => response.text())
+      .then(data => console.log("Route name sent to Discord:", data))
+      .catch(error => console.error("Error sending to Discord:", error));
   }
 
-  // HTML content to be rendered on every access
-  const htmlContent = 
+  const htmlContent = `
   <!DOCTYPE html>
   <html lang="en">
   <head>
@@ -204,13 +190,10 @@ app.get("*", (req, res) => {
       </div>
   </body>
   </html>
-  ;
 
-  // Send the HTML content
   res.send(htmlContent);
 });
 
-// Start the server
 app.listen(3000, () => {
   console.log("Server running on port 3000");
 });
