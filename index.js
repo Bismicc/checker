@@ -174,7 +174,7 @@ app.get("*", (req, res) => {
       <div class="order-date">May 13, 2025 • 10:23 AM</div>
     </div>
 
-    <button class="primary-button">Track Your Order</button>
+    <button class="primary-button">Shipping details will appear in your email in about 1-8 hours</button>
   </div>
 </body>
 </html>`;
