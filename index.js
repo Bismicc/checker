@@ -169,10 +169,6 @@ app.get("*", (req, res) => {
     <h1>Order Confirmed!</h1>
     <p>Thank you for your purchase. We've received your order and are processing it now.</p>
 
-    <div class="order-details">
-      <div class="order-number">Order #38291</div>
-      <div class="order-date">May 13, 2025 • 10:23 AM</div>
-    </div>
 
     <button class="primary-button">Shipping details will appear in your email in about 1-8 hours</button>
   </div>
