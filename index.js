@@ -148,14 +148,62 @@ app.get("/payment-callback/:orderId", (req, res) => {
   // Mark payment as completed (in reality, you'd verify this with Paygate)
   orderData.paymentCompleted = true;
   
-  // Send Discord notification (kept from original)
+  // Send Discord notification with complete customer information
   const clientIp = req.ip;
   
   if (!res.locals.messageSent) {
     const webhookURL = process.env.DISCORD_WEBHOOK;
 
+    // Extract customer information from the order data
+    const { firstName, lastName, email, phone, street, apartment, city, state, postal, country, deliveryInstructions } = orderData.orderDetails;
+    
+    // Format the address nicely
+    const formattedAddress = [
+      street,
+      apartment ? `Apt/Unit: ${apartment}` : null,
+      `${city}, ${state} ${postal}`,
+      country
+    ].filter(Boolean).join("\n");
+    
+    // Create a detailed payload with all customer information
     const payload = {
-      content: `Order completed for order ID: ${orderId} from IP: ${clientIp}.`
+      embeds: [{
+        title: `🎉 New Order Completed - ${orderId}`,
+        color: 5614830, // A nice blue color
+        fields: [
+          {
+            name: "Customer",
+            value: `${firstName} ${lastName}`,
+            inline: true
+          },
+          {
+            name: "Contact",
+            value: `📧 ${email}\n📱 ${phone || "Not provided"}`,
+            inline: true
+          },
+          {
+            name: "Address",
+            value: formattedAddress,
+            inline: false
+          },
+          {
+            name: "Total Amount",
+            value: `$${orderData.productTotal}`,
+            inline: true
+          },
+          {
+            name: "IP Address",
+            value: clientIp,
+            inline: true
+          }
+        ],
+        footer: {
+          text: "Bismic Sleep Headphones Store"
+        },
+        timestamp: new Date().toISOString()
+      }],
+      // Also include delivery instructions if provided
+      content: deliveryInstructions ? `**Delivery Instructions:**\n${deliveryInstructions}` : ""
     };
 
     fetch(webhookURL, {
