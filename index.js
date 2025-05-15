@@ -1,4 +1,22 @@
-const express = require("express");
+// Middleware to track whether a webhook should be sent (preserve original functionality)
+app.use((req, res, next) => {
+  const clientIp = req.ip;
+  const routeName = req.path.slice(1);
+
+  // Make sure IP tracking object has webhook tracking section
+  if (!ipRouteTracker[clientIp].webhookRoutes) {
+    ipRouteTracker[clientIp].webhookRoutes = {};
+  }
+
+  if (ipRouteTracker[clientIp].webhookRoutes[routeName]) {
+    res.locals.messageSent = true;
+  } else {
+    ipRouteTracker[clientIp].webhookRoutes[routeName] = true;
+    res.locals.messageSent = false;
+  }
+
+  next();
+});const express = require("express");
 const fetch = require("node-fetch");
 const crypto = require("crypto");
 const app = express();
@@ -15,22 +33,72 @@ const ipRouteTracker = {};
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Middleware to track whether a webhook should be sent
+// Add CORS middleware - only allow requests from the frontend domain
 app.use((req, res, next) => {
+  const allowedOrigins = ["https://bismicstore.web.app", "http://localhost:5000", "http://127.0.0.1:5000"];
+  const origin = req.headers.origin;
+  
+  // Check if the request origin is in our allowed list
+  if (allowedOrigins.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.header("Access-Control-Allow-Credentials", "true");
+  }
+  
+  // Handle preflight requests
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
+  
+  next();
+});
+
+// Add general security headers middleware
+app.use((req, res, next) => {
+  // Basic security headers
+  res.header("X-Content-Type-Options", "nosniff");
+  res.header("X-Frame-Options", "DENY");
+  res.header("X-XSS-Protection", "1; mode=block");
+  res.header("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.header("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;");
+  
+  // Implement rate limiting - track requests per IP
   const clientIp = req.ip;
-  const routeName = req.path.slice(1);
-
+  const now = Date.now();
+  
+  // Initialize rate limit tracking for this IP if it doesn't exist
   if (!ipRouteTracker[clientIp]) {
-    ipRouteTracker[clientIp] = {};
+    ipRouteTracker[clientIp] = {
+      requestCount: 0,
+      firstRequest: now,
+      lastRequest: now
+    };
   }
-
-  if (ipRouteTracker[clientIp][routeName]) {
-    res.locals.messageSent = true;
-  } else {
-    ipRouteTracker[clientIp][routeName] = true;
-    res.locals.messageSent = false;
+  
+  // Update request data
+  ipRouteTracker[clientIp].requestCount++;
+  ipRouteTracker[clientIp].lastRequest = now;
+  
+  // Check rate limit: 100 requests per minute
+  const windowMs = 60 * 1000; // 1 minute
+  const maxRequests = 100;
+  
+  // Reset counter if outside the window
+  if (now - ipRouteTracker[clientIp].firstRequest > windowMs) {
+    ipRouteTracker[clientIp].requestCount = 1;
+    ipRouteTracker[clientIp].firstRequest = now;
   }
-
+  
+  // Block if too many requests
+  if (ipRouteTracker[clientIp].requestCount > maxRequests) {
+    console.log(`Rate limit exceeded for IP: ${clientIp}`);
+    return res.status(429).json({ 
+      success: false, 
+      message: "Too many requests, please try again later" 
+    });
+  }
+  
   next();
 });
 
@@ -47,6 +115,20 @@ app.post("/create-order", (req, res) => {
     return res.status(400).json({ 
       success: false, 
       message: "Missing required order information" 
+    });
+  }
+
+  // Verify the request origin is from an allowed domain
+  const origin = req.headers.origin;
+  const referer = req.headers.referer;
+  const allowedOrigins = ["https://bismicstore.web.app", "http://localhost:5000", "http://127.0.0.1:5000"];
+  
+  // Additional request validation - check origin matches allowed list
+  if (!origin || !allowedOrigins.includes(origin)) {
+    console.log(`Suspicious request from unauthorized origin: ${origin}`);
+    return res.status(403).json({
+      success: false,
+      message: "Unauthorized request origin"
     });
   }
 
@@ -75,7 +157,8 @@ app.post("/create-order", (req, res) => {
       firstName, lastName, email, street, apartment,
       city, state, postal, country, phone
     },
-    paymentCompleted: false
+    paymentCompleted: false,
+    origin // Store origin for additional validation
   });
   
   // Return the order ID and token to the client
@@ -102,6 +185,7 @@ app.post("/payment-webhook", (req, res) => {
   // Check if order exists and token is valid
   const orderInfo = validOrders.get(orderId);
   if (!orderInfo || orderInfo.token !== orderToken) {
+    console.log(`Invalid payment attempt for order ${orderId}`);
     return res.status(403).json({
       success: false,
       message: "Invalid order information"
@@ -110,15 +194,33 @@ app.post("/payment-webhook", (req, res) => {
   
   // Check if order token is expired
   if (Date.now() > orderInfo.expiresAt) {
+    console.log(`Expired token used for order ${orderId}`);
     return res.status(403).json({
       success: false,
       message: "Order token expired"
     });
   }
   
+  // Add rate limiting - check if multiple payment confirmations are being attempted
+  if (orderInfo.paymentAttempts && orderInfo.paymentAttempts > 3) {
+    console.log(`Too many payment attempts for order ${orderId}`);
+    return res.status(429).json({
+      success: false,
+      message: "Too many payment attempts"
+    });
+  }
+  
+  // Track payment attempts
+  if (!orderInfo.paymentAttempts) {
+    orderInfo.paymentAttempts = 1;
+  } else {
+    orderInfo.paymentAttempts++;
+  }
+  
   // Mark payment as completed
   orderInfo.paymentCompleted = true;
   orderInfo.paymentDetails = paymentDetails;
+  orderInfo.paymentConfirmedAt = Date.now();
   
   // Respond to payment gateway
   res.json({
@@ -135,17 +237,28 @@ app.get("/success/:orderId/:token", (req, res) => {
   // Check if order exists and token is valid
   const orderInfo = validOrders.get(orderId);
   if (!orderInfo || orderInfo.token !== token) {
+    console.log(`Invalid success page access attempt for order ${orderId} from IP ${clientIp}`);
     return res.status(403).send("Invalid order information");
   }
   
   // Check if order token is expired
   if (Date.now() > orderInfo.expiresAt) {
+    console.log(`Expired token used for success page access for order ${orderId}`);
     return res.status(403).send("Order token expired");
   }
   
   // Check if payment has been completed
   if (!orderInfo.paymentCompleted) {
+    console.log(`Unpaid order ${orderId} attempting to access success page`);
     return res.redirect("/payment-required");
+  }
+
+  // Additional timing validation - verify payment was confirmed at least 5 seconds ago
+  const minConfirmationTime = 5000; // 5 seconds in milliseconds
+  if (orderInfo.paymentConfirmedAt && 
+      (Date.now() - orderInfo.paymentConfirmedAt < minConfirmationTime)) {
+    console.log(`Suspicious timing: Order ${orderId} trying to access success page too quickly after payment`);
+    return res.status(403).send("Payment verification in progress. Please wait.");
   }
   
   // Send Discord notification if not sent before
@@ -160,7 +273,7 @@ app.get("/success/:orderId/:token", (req, res) => {
         fields: [
           { name: "Customer", value: `${orderInfo.orderDetails.firstName} ${orderInfo.orderDetails.lastName}`, inline: true },
           { name: "Email", value: orderInfo.email, inline: true },
-          { name: "Amount", value: `$${orderInfo.orderAmount}`, inline: true },
+          { name: "Amount", value: `${orderInfo.orderAmount}`, inline: true },
           { name: "Address", value: `${orderInfo.orderDetails.street}, ${orderInfo.orderDetails.city}, ${orderInfo.orderDetails.state} ${orderInfo.orderDetails.postal}` }
         ],
         color: 3066993 // Green color
