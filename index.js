@@ -1,7 +1,19 @@
 const express = require("express");
 const fetch = require("node-fetch");
 const crypto = require('crypto');
+const cors = require("cors");
 const app = express();
+
+// Configure CORS to allow requests from your frontend domain
+const corsOptions = {
+  origin: ['https://bismicstore.web.app', 'http://localhost:3000'], // Add any development URLs too
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-API-Key'],
+  credentials: true
+};
+
+// Apply CORS middleware BEFORE your routes
+app.use(cors(corsOptions));
 
 // Store for pending orders with validation tokens
 const pendingOrders = {};
@@ -94,7 +106,7 @@ app.post("/api/process-payment", (req, res) => {
     
     // 2. Create a secure callback URL with only order ID (no personal info)
     const callbackPath = encodeURIComponent(`${orderId}`);
-    const callback = `https://yourserver.com/payment-callback/${callbackPath}`;
+    const callback = `https://bismicchecker.up.railway.app/payment-callback/${callbackPath}`;
     
     // 3. Generate Paygate URL with your wallet address
     const WALLET_ADDRESS = '0x1b8ddcC774826ab3984a18216B8E82CaD9D0198f';
@@ -156,155 +168,8 @@ app.get("/payment-callback/:orderId", (req, res) => {
       .catch(error => console.error("Error sending to Discord:", error));
   }
   
-  // Return success page
-  const htmlContent = `
-  <!DOCTYPE html>
-  <html lang="en">
-  <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Order Success</title>
-      <style>
-          body {
-              font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-              background-color: #f9fafb;
-              display: flex;
-              justify-content: center;
-              align-items: center;
-              height: 100vh;
-              margin: 0;
-              color: #1f2937;
-          }
-          
-          .success-card {
-              background-color: white;
-              border-radius: 16px;
-              box-shadow: 0 10px 25px rgba(0, 0, 0, 0.05);
-              padding: 40px;
-              width: 90%;
-              max-width: 480px;
-              text-align: center;
-              animation: fadeIn 0.6s ease-out;
-          }
-          
-          @keyframes fadeIn {
-              from { opacity: 0; transform: translateY(20px); }
-              to { opacity: 1; transform: translateY(0); }
-          }
-          
-          .checkmark-circle {
-              width: 80px;
-              height: 80px;
-              position: relative;
-              display: inline-block;
-              margin-bottom: 20px;
-          }
-          
-          .checkmark-circle-bg {
-              width: 80px;
-              height: 80px;
-              border-radius: 50%;
-              background-color: #ecfdf5;
-              display: flex;
-              align-items: center;
-              justify-content: center;
-          }
-          
-          .checkmark {
-              color: #10b981;
-              font-size: 40px;
-          }
-          
-          h1 {
-              margin: 0 0 8px 0;
-              font-size: 24px;
-              font-weight: 600;
-          }
-          
-          p {
-              margin: 0 0 24px 0;
-              color: #6b7280;
-              font-size: 16px;
-              line-height: 1.5;
-          }
-          
-          .order-details {
-              background-color: #f9fafb;
-              border-radius: 8px;
-              padding: 16px;
-              margin-bottom: 24px;
-              text-align: left;
-          }
-          
-          .order-number {
-              font-weight: 600;
-              margin-bottom: 8px;
-          }
-          
-          .order-date {
-              color: #6b7280;
-              font-size: 14px;
-          }
-          
-          .primary-button {
-              background-color: #10b981;
-              color: white;
-              border: none;
-              border-radius: 8px;
-              padding: 12px 24px;
-              font-size: 16px;
-              font-weight: 500;
-              cursor: pointer;
-              transition: background-color 0.2s;
-              width: 100%;
-              margin-bottom: 12px;
-          }
-          
-          .primary-button:hover {
-              background-color: #059669;
-          }
-          
-          .secondary-button {
-              background-color: transparent;
-              color: #4b5563;
-              border: 1px solid #e5e7eb;
-              border-radius: 8px;
-              padding: 12px 24px;
-              font-size: 16px;
-              font-weight: 500;
-              cursor: pointer;
-              transition: background-color 0.2s;
-              width: 100%;
-          }
-          
-          .secondary-button:hover {
-              background-color: #f3f4f6;
-          }
-      </style>
-  </head>
-  <body>
-      <div class="success-card">
-          <div class="checkmark-circle">
-              <div class="checkmark-circle-bg">
-                  <span class="checkmark">✓</span>
-              </div>
-          </div>
-          
-          <h1>Order Confirmed!</h1>
-          <p>Thank you for your purchase. We've received your order and are processing it now.</p>
-          
-          <div class="order-details">
-              <div class="order-number">Order #${orderId.substring(0, 8)}</div>
-              <div class="order-date">${new Date().toLocaleDateString()} • ${new Date().toLocaleTimeString()}</div>
-          </div>
-          
-          <button class="primary-button" onclick="window.location.href='/'">Return to Home</button>
-      </div>
-  </body>
-  </html>
-  `;
-
-  res.send(htmlContent);
+  // Redirect to frontend success page instead of returning HTML
+  res.redirect(`https://bismicstore.web.app/payment-success.html?orderId=${orderId}`);
 });
 
 // Check order status endpoint
@@ -353,6 +218,11 @@ app.get("/api/admin/verify-order/:orderId", (req, res) => {
   });
 });
 
+// API health check endpoint
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: "ok", message: "API is running" });
+});
+
 // Serve your frontend files here
 app.use(express.static('public'));
 
@@ -366,6 +236,7 @@ setInterval(() => {
   }
 }, 3600000); // Run every hour
 
-app.listen(3000, () => {
-  console.log("Server running on port 3000");
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
